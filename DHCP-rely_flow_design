@@ -1,0 +1,105 @@
+DHCP relay flow :-
+
+1) The DHCP relay is actually will be running on top of controller.
+
+2) A static flow entry will be set on OVS for broadcast, DHCP packets to send
+   to controller if needed.
+
+3) In either of the cases, when DHCP DISCOVER packet is sent from the VM then
+   the OVS will send the PACKET_IN message to controller. A listener should be
+   registered with the floodlight controller to receive these packets.
+
+4) This listener should parse the DHCP packet get the VM details(OVS port, MAC
+   address etc) and store it in its in RAM database.
+
+5) Then, the listener should give the DHCP DISCOVER packet to the DHCP relay
+   service running as part of OC controller.
+
+6) The DHCP relay service will prepare a new DHCP discover packet populating
+   all relay agent options(GIADDR & link-select etc).
+   It uses few configuration files/OC database to fill the link-select option
+   with tenant network ID. Then sends the newly formed packet to the DHCP
+   servers configured in the relay agent. 
+
+7) Then DHCP server sends the DHCP reply packets to the controller based on
+   GIADDR filed.
+
+8) There will be some thread listening through socket on DHCP port-68 for DHCP
+   reply packets. It parses the packets received from DHCP servers.
+   Gets the IP address of VM with MAC as CHADDR in OC database.
+   Then, it pushes the packet to the DHCP reply pusher.
+
+9) The DHCP reply pusher prepares a PACKET_OUT message based on the 
+   CHADDR field of DHCP reply packets. And, pushes the packet to the OVS
+   to send out from the port to which the CHADDR belongs to.
+  
+
+
+
+                             From
+                          DHCP server
+                          (socket)
+                          /    /
+                         /    /
+                        /    /
+                       /    /
+                      /    /
+        -------------/----/-------
+        |           /    /       | 
+        |          /    /        |
+        |   ______/____/_____    |
+        |  |                |    |    
+        |  | DHCP reply     |    | 
+        |  |  handler       |-------------------------
+        |  |                |    |                   |
+        |  |________________|    |                   |
+        |                        |                   |
+        |                        |           _______\|/_________
+        |                        |           |                 |
+        |                        |           |                 |
+        |                        |           |   DHCP reply    |
+        |                        |           |     Pusher      |--------------------
+        |                        |     ------|                 |                   |
+        |                        |     |     |_________________|                   |
+        |                        |     |                                           |
+        |    DHCP Relay Agent    |     |                                           |
+        |                        |     |                                           |
+        |                        |     |                                           |
+  To    |  _________________     |     |                                           |
+ DHCP   |  |                |    |     |                                           |
+ Server |  |                |    |     |                                           |                  
+ -------|--| DHCP request   |    |     |                                           |                 
+(socket)|  |    handler     |    |     |                                   _______\|/____________   
+ -------|--|                |    |     |                                   |                    |                        _________________ 
+        |  |________________|    |     |                                   |                    |________________________|               |
+        |        /|\             |     |                 ------------------|     Floodlight     |                        |               |
+        |         |              |     |                |                  |     Controller     | Secure channel to OVS  |  OVS          | 
+        |         |              |     |                |                  |                    |________________________|               |
+        |         |              |     |                |                  |____________________|                        |_______________|
+        |         |              |     |                |             
+        |         |              |     |                |                                                                       
+        |---------|---------------     |                |            
+                  |                    |                |                      
+                  |                    |        _______\|/________
+                  |                    |        |                |        
+                  ----------------------------- |  DHCP Request  |  
+                                       |        |    listener    |
+                                       |        |                |
+                                       |        |________________|
+                                       |                |
+                                       |                |
+                                       |                |
+                                       |                |
+                            __________\|/__________     |
+                            |                     |     |
+                            |    OC Controller    |     |
+                            |       *             |<-----
+                            |                     |
+                            |                     |
+                            |_____________________|
+
+
+* -> Part of the database is provided from DeviceManagerService of the Floodlight controller.
+
+
+
